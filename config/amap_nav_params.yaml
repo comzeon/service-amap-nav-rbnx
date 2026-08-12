@@ -1,0 +1,5 @@
+# amap_nav 运行参数 (部署仓 manifest config 可覆盖)
+# 设计 4.3 / 4.5
+cross_track_threshold_m: 20.0     # 默认 20m (可配 15~25m)
+crossing_wait_timeout_s: 90.0
+max_route_km: 20.0                # 任务距离上限 (护栏)
