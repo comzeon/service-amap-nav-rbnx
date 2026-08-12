@@ -1,0 +1,5 @@
+# robonix/service/navigation/amap_cancel — cancel a task (empty = latest).
+string task_id
+---
+bool accepted
+string detail

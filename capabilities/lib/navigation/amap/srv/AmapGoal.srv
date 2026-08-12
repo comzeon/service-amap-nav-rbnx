@@ -1,0 +1,12 @@
+# robonix/service/navigation/amap_goal — start an AMap-assisted A->B task.
+# Destination: pass dest_gcj02 ("lon,lat", GCJ02) OR dest_address (geocoded
+# server-side). confirm_medium_energy = user approved medium-energy segments
+# (crossings/bridges) for this task (design 4.3 energy gating).
+string dest_gcj02
+string dest_address
+bool confirm_medium_energy
+---
+bool accepted
+string task_id
+string route_summary
+string detail

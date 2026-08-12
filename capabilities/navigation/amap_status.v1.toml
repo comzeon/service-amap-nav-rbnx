@@ -1,0 +1,10 @@
+# Query status of an AMap navigation task.
+[contract]
+id      = "robonix/service/navigation/amap_status"
+version = "1"
+kind    = "service"
+idl     = "navigation/amap/srv/AmapStatus.srv"
+description = "Read task state for an AMap-assisted A->B navigation run."
+
+[mode]
+type = "rpc"

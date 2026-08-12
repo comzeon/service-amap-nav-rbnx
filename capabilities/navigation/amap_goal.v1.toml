@@ -1,0 +1,10 @@
+# Start an AMap-assisted A->B navigation task.
+[contract]
+id      = "robonix/service/navigation/amap_goal"
+version = "1"
+kind    = "service"
+idl     = "navigation/amap/srv/AmapGoal.srv"
+description = "Plan an AMap walking route to the destination and start executing segments."
+
+[mode]
+type = "rpc"

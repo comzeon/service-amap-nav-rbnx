@@ -1,0 +1,7 @@
+# robonix/service/navigation/amap_crossing_confirm — human decision at a
+# cross_road gate (Phase 1: manual confirm; Phase 2: vision auto-detection).
+string task_id
+bool proceed
+---
+bool accepted
+string detail

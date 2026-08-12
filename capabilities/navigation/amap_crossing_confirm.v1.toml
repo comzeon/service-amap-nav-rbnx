@@ -1,0 +1,10 @@
+# Human decision at a cross_road gate (Phase 1: manual; Phase 2: vision).
+[contract]
+id      = "robonix/service/navigation/amap_crossing_confirm"
+version = "1"
+kind    = "service"
+idl     = "navigation/amap/srv/AmapCrossingConfirm.srv"
+description = "Confirm or deny crossing at an AMap cross_road gate."
+
+[mode]
+type = "rpc"

@@ -1,0 +1,10 @@
+# Cancel an AMap navigation task.
+[contract]
+id      = "robonix/service/navigation/amap_cancel"
+version = "1"
+kind    = "service"
+idl     = "navigation/amap/srv/AmapCancel.srv"
+description = "Cancel a previously accepted AMap-assisted navigation task."
+
+[mode]
+type = "rpc"

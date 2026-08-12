@@ -1,0 +1,7 @@
+# robonix/service/navigation/amap_status — task status (empty task_id = latest).
+string task_id
+---
+bool known
+string state
+string detail
+string current_step
