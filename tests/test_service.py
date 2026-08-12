@@ -67,6 +67,17 @@ def _req(cls, **kw):
     return r
 
 
+class _StubNav:
+    """模拟 navigate 客户端 (go 记录调用)."""
+
+    def __init__(self):
+        self.goals = []
+
+    def go(self, x, y):
+        self.goals.append((x, y))
+        return f"run-{len(self.goals)}"
+
+
 class TestAmapGoal(unittest.TestCase):
     def setUp(self):
         # 干净的全局状态
@@ -160,14 +171,18 @@ class TestCancel(unittest.TestCase):
         svc._LATEST_TASK_ID = "t1"
         svc._TASKS["t1"] = st.Task(task_id="t1", dest_gcj02=(116.0, 39.0),
                                    state=st.EXECUTING)
-        svc._EXECUTOR = mock.MagicMock()
-        svc._EXECUTOR.state = st.EXECUTING
+        from amap_nav_service import executor as ex
+        svc._EXECUTOR = ex.Executor(navigate=_StubNav())
+        svc._EXECUTOR.set_waypoints([(0.0, 0.0, "normal"), (10.0, 0.0, "normal")])
 
     def test_cancel_stops_executor(self):
         r = svc.amap_cancel(_req(nav_mcp.AmapCancel_Request, task_id="t1"))
         self.assertTrue(r.accepted)
         self.assertEqual(svc._EXECUTOR.state, st.CANCELLED)
         self.assertEqual(svc._TASKS["t1"].state, st.CANCELLED)
+        # 取消后 step_once 不再发 goal
+        svc._EXECUTOR.step_once()
+        self.assertEqual(len(svc._EXECUTOR.waypoints), 2)
 
     def test_cancel_unknown_task(self):
         r = svc.amap_cancel(_req(nav_mcp.AmapCancel_Request, task_id="nope"))
@@ -196,6 +211,29 @@ class TestSyncTaskState(unittest.TestCase):
         svc._EXECUTOR.latest_detail = "crossing denied"
         svc._sync_task_state()
         self.assertEqual(task.state, st.FAILED)
+
+    def test_replanning_passthrough(self):
+        svc._TASKS.clear()
+        svc._LATEST_TASK_ID = "t1"
+        task = st.Task(task_id="t1", dest_gcj02=(116.0, 39.0), state=st.EXECUTING)
+        svc._TASKS["t1"] = task
+        svc._EXECUTOR = mock.MagicMock()
+        svc._EXECUTOR.state = st.REPLANNING
+        svc._EXECUTOR.latest_detail = "off-track"
+        svc._sync_task_state()
+        self.assertEqual(task.state, st.REPLANNING)
+
+    def test_terminal_task_ignores_late_sync(self):
+        # Task 已 DONE, executor 迟到的状态回写不抛错
+        svc._TASKS.clear()
+        svc._LATEST_TASK_ID = "t1"
+        task = st.Task(task_id="t1", dest_gcj02=(116.0, 39.0), state=st.DONE)
+        svc._TASKS["t1"] = task
+        svc._EXECUTOR = mock.MagicMock()
+        svc._EXECUTOR.state = st.FAILED
+        svc._EXECUTOR.latest_detail = "late"
+        svc._sync_task_state()  # 不应抛 ValueError
+        self.assertEqual(task.state, st.DONE)
 
 
 class TestCrossingConfirm(unittest.TestCase):

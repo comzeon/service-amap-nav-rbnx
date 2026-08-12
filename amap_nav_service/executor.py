@@ -134,3 +134,15 @@ class Executor:
         self.crossing_wait_since = None
         self.latest_detail = "crossing confirmed"
         return True
+
+    def cancel(self) -> bool:
+        """停止执行: 置 CANCELLED 使 step_once 短路, 不再发新 goal.
+
+        已在途的运动指令由下层 navigate 的 cancel 语义负责(Phase 1 stub
+        无; Task 10/11 真机接线时扩展)。
+        """
+        if self.state in (st.CANCELLED, st.DONE, st.FAILED):
+            return False
+        self.state = st.CANCELLED
+        self.latest_detail = "cancelled by operator"
+        return True

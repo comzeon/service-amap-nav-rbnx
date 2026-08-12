@@ -239,10 +239,9 @@ def amap_cancel(req: AmapCancel_Request) -> AmapCancel_Response:
             task.transition(st.CANCELLED, "cancelled by operator")
     if task is None:
         return AmapCancel_Response(accepted=False, detail="no task")
-    # 关键: 短路 executor, 立即停止发新 goal (审查 #2: 取消必须停运动)
+    # 关键: 停止 executor, 立即停止发新 goal (审查 #2: 取消必须停运动)
     if _EXECUTOR is not None:
-        _EXECUTOR.state = st.CANCELLED
-        _EXECUTOR.latest_detail = "cancelled by operator"
+        _EXECUTOR.cancel()
     return AmapCancel_Response(accepted=True, detail="cancelled")
 
 
@@ -250,6 +249,13 @@ def amap_cancel(req: AmapCancel_Request) -> AmapCancel_Response:
 def amap_crossing_confirm(req: AmapCrossingConfirm_Request) -> AmapCrossingConfirm_Response:
     if _EXECUTOR is None:
         return AmapCrossingConfirm_Response(accepted=False, detail="not initialized")
+    # 任务归属校验: 只允许确认最近任务 (或显式指定同一任务)
+    task_id = req.task_id or _LATEST_TASK_ID or ""
+    with _LOCK:
+        task = _TASKS.get(task_id)
+    if task is None or task.state != st.CROSSING_WAIT:
+        return AmapCrossingConfirm_Response(accepted=False,
+                                            detail="no task waiting at crossing gate")
     ok = _EXECUTOR.confirm_crossing(bool(req.proceed))
     return AmapCrossingConfirm_Response(accepted=ok,
                                         detail="confirmed" if ok else "no crossing gate active")
@@ -261,12 +267,12 @@ def _ticker_loop() -> None:
         if _EXECUTOR is None:
             continue
         # 可选位姿源: AMAP_POSE_FILE 每 tick 读 "x,y" (UTM), 供偏离检测
-        if _POSE_FILE and _EXECUTOR.pose_utm is None:
+        if _POSE_FILE:
             try:
                 with open(_POSE_FILE, "r", encoding="utf-8") as f:
                     x, y = (float(v) for v in f.read().strip().split(","))
                 _EXECUTOR.update_pose(x, y)
-            except Exception:  # noqa: BLE001 — 读不到就跳过
+            except Exception:  # noqa: BLE001 — 读不到/解析失败就跳过
                 pass
         try:
             _EXECUTOR.step_once()

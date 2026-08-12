@@ -110,6 +110,25 @@ class TestExecutor(unittest.TestCase):
         self.assertEqual(exe.state, ex.st.FAILED)
         self.assertIn("nav down", exe.latest_detail)
 
+    def test_cancel_stops_dispatching(self):
+        self.exe.set_waypoints([(0.0, 0.0, "normal"), (10.0, 0.0, "normal"),
+                                (20.0, 0.0, "normal")])
+        self.exe.step_once()  # 发 1 个
+        self.assertTrue(self.exe.cancel())
+        self.exe.step_once()  # 取消后不再发
+        self.exe.step_once()
+        self.assertEqual(len(self.fake.goals), 1)
+        self.assertEqual(self.exe.state, ex.st.CANCELLED)
+        # 二次 cancel 幂等
+        self.assertFalse(self.exe.cancel())
+
+    def test_replanning_state_passthrough(self):
+        self.exe.set_waypoints([(0.0, 0.0, "normal"), (100.0, 0.0, "normal")])
+        self.exe.step_once()
+        self.exe.update_pose(50.0, 30.0)
+        self.exe.step_once()  # 偏离 → REPLANNING
+        self.assertEqual(self.exe.state, ex.st.REPLANNING)
+
     def test_off_track_triggers_replanning(self):
         replanned = []
         self.exe.on_replan_requested = lambda: replanned.append(True)
