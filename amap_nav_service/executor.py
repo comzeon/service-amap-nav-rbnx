@@ -44,9 +44,11 @@ def cross_track_m(pose: tuple[float, float],
 
 
 class Executor:
-    def __init__(self, navigate, cross_track_threshold_m: float = REPLAN_THRESHOLD_M):
+    def __init__(self, navigate, cross_track_threshold_m: float = REPLAN_THRESHOLD_M,
+                 crossing_wait_timeout_s: float = CROSSING_WAIT_TIMEOUT_S):
         self.navigate = navigate
         self.cross_track_threshold_m = cross_track_threshold_m
+        self.crossing_wait_timeout_s = crossing_wait_timeout_s
         self.waypoints: list[WaypointUTM] = []
         self.idx = 0
         self.state = st.IDLE
@@ -116,7 +118,7 @@ class Executor:
             self.crossing_wait_since = None
             return
         if self.crossing_wait_since is not None and \
-                time.time() - self.crossing_wait_since > CROSSING_WAIT_TIMEOUT_S:
+                time.time() - self.crossing_wait_since > self.crossing_wait_timeout_s:
             self.state = st.FAILED
             self.latest_detail = "crossing gate timeout"
 

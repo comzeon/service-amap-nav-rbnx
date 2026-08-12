@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -36,9 +37,37 @@ _TICKER: threading.Thread | None = None
 _TICK_EVT = threading.Event()
 _LOCK = threading.Lock()
 _UTM_ZONE: int | None = None
+_POSE_FILE: str | None = None
 
 # 任务距离上限 (设计 4.5 护栏; config 可覆盖)
 MAX_ROUTE_KM = float(os.environ.get("AMAP_MAX_ROUTE_KM", "20.0"))
+
+# executor 状态 → Task 状态映射 (审查 #1/#10: 双状态域同步)
+_EXECUTOR_STATE_MAP = {
+    st.EXECUTING: st.EXECUTING,
+    st.CROSSING_WAIT: st.CROSSING_WAIT,
+    st.REPLANNING: st.REPLANNING,
+    st.ARRIVED: st.DONE,
+    st.FAILED: st.FAILED,
+    st.CANCELLED: st.CANCELLED,
+}
+
+
+def _sync_task_state() -> None:
+    """把 executor 状态回写到当前 Task (供 amap_status 可观测)."""
+    task = _TASKS.get(_LATEST_TASK_ID or "") if _LATEST_TASK_ID else None
+    if task is None or _EXECUTOR is None:
+        return
+    es = _EXECUTOR.state
+    if es == st.IDLE:
+        return
+    ts = _EXECUTOR_STATE_MAP.get(es)
+    if ts is None or ts == task.state:
+        return
+    try:
+        task.transition(ts, _EXECUTOR.latest_detail or "")
+    except ValueError:
+        pass  # Task 已到终态, executor 迟到的状态回写忽略
 
 
 def _resolve_nav_endpoint(deadline_s: float = 30.0) -> dict[str, str]:
@@ -111,6 +140,9 @@ def amap_goal(req: AmapGoal_Request) -> AmapGoal_Response:
     if req.dest_gcj02.strip():
         try:
             lon, lat = (float(v) for v in req.dest_gcj02.split(","))
+            if not (math.isfinite(lon) and math.isfinite(lat)
+                    and 72.0 <= lon <= 138.0 and 0.8 <= lat <= 56.0):
+                raise ValueError("out of range")
             dest = (lon, lat)
         except ValueError:
             return AmapGoal_Response(accepted=False, task_id="", route_summary="",
@@ -154,12 +186,16 @@ def amap_goal(req: AmapGoal_Request) -> AmapGoal_Response:
                                         f"set confirm_medium_energy=true")
 
     # 转 UTM 执行帧 (固定带号)
-    wps_utm: list[tuple[float, float, str]] = []
-    for w in wps_gcj:
-        lon, lat = cf.gcj02_to_wgs84(w.lon, w.lat)
-        x, y, z = cf.to_utm(lon, lat, _UTM_ZONE)
-        _UTM_ZONE = z
-        wps_utm.append((x, y, w.seg_type))
+    try:
+        wps_utm: list[tuple[float, float, str]] = []
+        for w in wps_gcj:
+            lon, lat = cf.gcj02_to_wgs84(w.lon, w.lat)
+            x, y, z = cf.to_utm(lon, lat, _UTM_ZONE)
+            _UTM_ZONE = z
+            wps_utm.append((x, y, w.seg_type))
+    except Exception as e:  # noqa: BLE001 — pyproj 缺失/投影失败
+        return AmapGoal_Response(accepted=False, task_id="", route_summary="",
+                                 detail=f"UTM conversion failed: {e}")
 
     task = st.Task(task_id=task_id, dest_gcj02=dest)
     with _LOCK:
@@ -203,6 +239,10 @@ def amap_cancel(req: AmapCancel_Request) -> AmapCancel_Response:
             task.transition(st.CANCELLED, "cancelled by operator")
     if task is None:
         return AmapCancel_Response(accepted=False, detail="no task")
+    # 关键: 短路 executor, 立即停止发新 goal (审查 #2: 取消必须停运动)
+    if _EXECUTOR is not None:
+        _EXECUTOR.state = st.CANCELLED
+        _EXECUTOR.latest_detail = "cancelled by operator"
     return AmapCancel_Response(accepted=True, detail="cancelled")
 
 
@@ -218,21 +258,36 @@ def amap_crossing_confirm(req: AmapCrossingConfirm_Request) -> AmapCrossingConfi
 # ── ticker: 驱动 executor.step_once (1Hz) ─────────────────────────────
 def _ticker_loop() -> None:
     while not _TICK_EVT.wait(1.0):
-        if _EXECUTOR is not None:
+        if _EXECUTOR is None:
+            continue
+        # 可选位姿源: AMAP_POSE_FILE 每 tick 读 "x,y" (UTM), 供偏离检测
+        if _POSE_FILE and _EXECUTOR.pose_utm is None:
             try:
-                _EXECUTOR.step_once()
-            except Exception:  # noqa: BLE001 — ticker 不能死
-                log.exception("ticker step_once failed")
+                with open(_POSE_FILE, "r", encoding="utf-8") as f:
+                    x, y = (float(v) for v in f.read().strip().split(","))
+                _EXECUTOR.update_pose(x, y)
+            except Exception:  # noqa: BLE001 — 读不到就跳过
+                pass
+        try:
+            _EXECUTOR.step_once()
+        except Exception:  # noqa: BLE001 — ticker 不能死
+            log.exception("ticker step_once failed")
+        _sync_task_state()
 
 
 # ── lifecycle ─────────────────────────────────────────────────────────
 @amap_nav.on_init
 def init(cfg):
-    global _EXECUTOR, _TICKER, MAX_ROUTE_KM
+    global _EXECUTOR, _TICKER, MAX_ROUTE_KM, _POSE_FILE
     if not os.environ.get("AMAP_WEB_KEY"):
         return Err("AMAP_WEB_KEY not set")
     params = (cfg or {}).get("amap_nav_params") or {}
     MAX_ROUTE_KM = float(params.get("max_route_km", MAX_ROUTE_KM))
+    cross_track = float(params.get("cross_track_threshold_m",
+                                   ex.REPLAN_THRESHOLD_M))
+    crossing_timeout = float(params.get("crossing_wait_timeout_s",
+                                        ex.CROSSING_WAIT_TIMEOUT_S))
+    _POSE_FILE = os.environ.get("AMAP_POSE_FILE")
 
     endpoints = _resolve_nav_endpoint()
     if "navigate" not in endpoints:
@@ -243,10 +298,13 @@ def init(cfg):
         def go(self, x, y):
             return "stub-run"
 
-    _EXECUTOR = ex.Executor(navigate=_StubNav())
+    _EXECUTOR = ex.Executor(navigate=_StubNav(),
+                            cross_track_threshold_m=cross_track,
+                            crossing_wait_timeout_s=crossing_timeout)
     _TICKER = threading.Thread(target=_ticker_loop, name="amap-nav-ticker", daemon=True)
     _TICKER.start()
-    log.info("amap_nav init ok: nav=%s", endpoints)
+    log.info("amap_nav init ok: nav=%s cross_track=%.1f timeout=%.0f",
+             endpoints, cross_track, crossing_timeout)
     return Ok()
 
 
