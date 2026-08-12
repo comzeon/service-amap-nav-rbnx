@@ -85,7 +85,10 @@ def walking_route(origin: tuple[float, float], destination: tuple[float, float],
         "destination": f"{destination[0]:.6f},{destination[1]:.6f}",
         "show_fields": "cost,navi,polyline",
     }, key=key)
-    path = data["route"]["paths"][0]
+    paths = (data.get("route") or {}).get("paths") or []
+    if not paths:
+        raise AmapError("BADRESP", "route/paths missing from walking response")
+    path = paths[0]
     steps: list[RouteStep] = []
     for st in path.get("steps", []):
         navi = st.get("navi", {}) or {}
