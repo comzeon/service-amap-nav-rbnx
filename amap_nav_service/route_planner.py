@@ -12,12 +12,12 @@ from dataclasses import dataclass
 
 from .amap_client import WalkingRoute
 
-# 设计 4.1 白名单: 允许(含未知类型默认放行) / 明确排除
+# 设计 4.1 白名单: 严格白名单, 不在集合内的类型一律拒绝（高德新增类型
+# 默认不可通行, 宁停勿闯）。BLOCKED 仅用于更精确的错误文案。
 ALLOWED_WALK_TYPES = {0, 1, 3, 4, 6, 7, 20, 21, 22, 23}
 BLOCKED_WALK_TYPES = {8, 9, 10, 11, 14, 15, 16, 30}
 CROSS_ROAD_TYPE = 1
 MAX_SEG_M = 40.0
-MIN_KEEP_M = 5.0
 TURN_DEG = 30.0
 
 
@@ -52,12 +52,11 @@ def _seg_dist(a: tuple[float, float], b: tuple[float, float]) -> float:
 
 
 def _simplify(pts: list[tuple[float, float]], max_seg_m: float = MAX_SEG_M,
-              min_keep_m: float = MIN_KEEP_M, turn_deg: float = TURN_DEG
-              ) -> list[tuple[float, float]]:
+              turn_deg: float = TURN_DEG) -> list[tuple[float, float]]:
     """贪心抽稀: 保留拐点 + 累计距离达 max_seg_m 时保点.
 
-    间距保证 ≤ max_seg_m + 单段步长（acc 先加后判, 允许一步过冲）;
-    min_keep_m 预留（防过密点抖动）, 当前实现不强制下界.
+    间距保证 ≤ max_seg_m + 单段步长（acc 先加后判, 允许一步过冲）。
+    例外: 少于 3 点的折线原样返回（无中间几何可插, 末点必达优先）。
     """
     if len(pts) <= 2:
         return list(pts)
@@ -75,9 +74,9 @@ def _simplify(pts: list[tuple[float, float]], max_seg_m: float = MAX_SEG_M,
             acc = d
         else:
             acc += d
-            if acc >= max_seg_m:
-                out.append(b)
-                acc = 0.0
+        if acc >= max_seg_m:
+            out.append(b)
+            acc = 0.0
         prev_bearing = bearing
     if out[-1] != pts[-1]:
         out.append(pts[-1])
@@ -85,12 +84,14 @@ def _simplify(pts: list[tuple[float, float]], max_seg_m: float = MAX_SEG_M,
 
 
 def plan(route: WalkingRoute) -> list[RouteWaypoint]:
-    """过滤 + 标记 + 抽稀. 白名单外路段抛 RouteNotTraversable."""
+    """严格白名单过滤 + 标记 + 抽稀. 不在白名单的段抛 RouteNotTraversable."""
     wps: list[RouteWaypoint] = []
     for idx, step in enumerate(route.steps):
-        if step.walk_type in BLOCKED_WALK_TYPES:
+        if step.walk_type not in ALLOWED_WALK_TYPES:
+            kind = "blocked" if step.walk_type in BLOCKED_WALK_TYPES else "unknown"
             raise RouteNotTraversable(
-                f"step {idx} walk_type={step.walk_type} blocked: {step.instruction}")
+                f"step {idx} walk_type={step.walk_type} ({kind}) not allowed: "
+                f"{step.instruction}")
         st = _seg_type(step.walk_type)
         if not step.polyline:
             continue  # 无几何, 跳过(防御)
