@@ -37,6 +37,8 @@ class Task:
     def transition(self, new_state: str, detail: str = "") -> None:
         if new_state not in VALID:
             raise ValueError(f"invalid state: {new_state}")
+        if self.state in TERMINAL:
+            raise ValueError(f"cannot transition from terminal state {self.state}")
         self.history.append((time.time(), f"{self.state}->{new_state}: {detail}"))
         self.state = new_state
         self.detail = detail

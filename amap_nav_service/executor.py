@@ -1,20 +1,21 @@
 # SPDX-License-Identifier: MulanPSL-2.0
 """executor — 逐段执行 + 过街闸门 + 偏离检测 (设计 4.3).
 
-navigate 抽象: 传入实现了 go(x, y) -> run_id 与 status() -> str 的客户端
+navigate 抽象: 传入实现了 go(x, y) -> run_id 的客户端
 （生产=ATLAS 解析后的 navigate MCP/ROS 调用; 测试=fake）。
+go() 抛异常时 step_once 将任务置 FAILED（宁停勿循环重试）。
 纯函数 cross_track_m 可单测; Executor.step_once 由外部 1Hz ticker 驱动。
 """
 from __future__ import annotations
 
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from . import state as st
 
 CROSSING_WAIT_TIMEOUT_S = 90.0
-ARRIVE_M = 1.5
 REPLAN_THRESHOLD_M = 20.0  # 默认 20m (设计 4.3)
 
 
@@ -53,7 +54,7 @@ class Executor:
         self.crossing_wait_since: float | None = None
         self.pose_utm: tuple[float, float] | None = None
         self.latest_detail = ""
-        self.on_replan_requested: callable | None = None  # 置位→上层触发重规划
+        self.on_replan_requested: Callable[[], None] | None = None  # 置位→上层触发重规划
 
     def set_waypoints(self, wps: list[tuple[float, float, str]]) -> None:
         self.waypoints = [WaypointUTM(x, y, t) for x, y, t in wps]
@@ -99,7 +100,12 @@ class Executor:
             return
 
         # 发 goal 并推进
-        run = self.navigate.go(wp.x, wp.y)
+        try:
+            run = self.navigate.go(wp.x, wp.y)
+        except Exception as e:  # noqa: BLE001 — 宁停勿循环重试
+            self.state = st.FAILED
+            self.latest_detail = f"navigate.go failed at seg {self.idx}: {e}"
+            return
         self.latest_detail = f"seg {self.idx} -> ({wp.x:.1f},{wp.y:.1f}) run={run}"
         self.idx += 1
         self.crossing_confirmed = False  # 每段重置; 过街段由 confirm 置位

@@ -26,6 +26,12 @@ class TestTask(unittest.TestCase):
         for s in (st.DONE, st.CANCELLED, st.FAILED):
             self.assertIn(s, st.TERMINAL)
 
+    def test_terminal_rejects_further_transition(self):
+        t = st.Task(task_id="t1", dest_gcj02=(116.0, 39.0))
+        t.transition(st.DONE, "done")
+        with self.assertRaises(ValueError):
+            t.transition(st.EXECUTING, "revive")
+
     def test_full_lifecycle(self):
         t = st.Task(task_id="t1", dest_gcj02=(116.0, 39.0))
         t.transition(st.EXECUTING, "start")

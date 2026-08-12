@@ -73,6 +73,43 @@ class TestExecutor(unittest.TestCase):
         self.exe.set_waypoints([(0.0, 0.0, "normal")])
         self.assertFalse(self.exe.confirm_crossing(True))
 
+    def test_crossing_gate_timeout_fails(self):
+        import time as _t
+        self.exe.set_waypoints([(10.0, 0.0, "cross_road")])
+        self.exe.step_once()  # 进闸门
+        self.exe.crossing_wait_since = _t.time() - ex.CROSSING_WAIT_TIMEOUT_S - 1
+        self.exe.step_once()
+        self.assertEqual(self.exe.state, ex.st.FAILED)
+        self.assertIn("timeout", self.exe.latest_detail)
+
+    def test_consecutive_crossings_each_gated(self):
+        # 连续两个过街段: 每段都需要独立人工确认
+        self.exe.set_waypoints([
+            (0.0, 0.0, "cross_road"),
+            (50.0, 0.0, "cross_road"),
+        ])
+        self.exe.step_once()  # 段1 进闸门
+        self.exe.confirm_crossing(True)
+        self.exe.step_once()  # 段1 下发
+        self.assertEqual(len(self.fake.goals), 1)
+        self.exe.step_once()  # 段2 重新进闸门
+        self.assertEqual(self.exe.state, ex.st.CROSSING_WAIT)
+        self.assertEqual(len(self.fake.goals), 1)  # 未下发
+        self.exe.confirm_crossing(True)
+        self.exe.step_once()  # 段2 下发
+        self.assertEqual(len(self.fake.goals), 2)
+
+    def test_go_exception_fails_task(self):
+        class BrokenNav:
+            def go(self, x, y):
+                raise RuntimeError("nav down")
+
+        exe = ex.Executor(navigate=BrokenNav())
+        exe.set_waypoints([(0.0, 0.0, "normal")])
+        exe.step_once()
+        self.assertEqual(exe.state, ex.st.FAILED)
+        self.assertIn("nav down", exe.latest_detail)
+
     def test_off_track_triggers_replanning(self):
         replanned = []
         self.exe.on_replan_requested = lambda: replanned.append(True)
