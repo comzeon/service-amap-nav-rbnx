@@ -51,6 +51,7 @@ def gcj02_to_wgs84(lon: float, lat: float, iters: int = 3) -> tuple[float, float
     """GCJ02 -> WGS84 迭代反算（高德不提供反向 API）. 3 次迭代亚米级误差."""
     if _out_of_china(lon, lat):
         return lon, lat
+    iters = max(1, iters)
     glon, glat = lon, lat
     for _ in range(iters):
         glon2, glat2 = wgs84_to_gcj02(glon, glat)
@@ -60,10 +61,14 @@ def gcj02_to_wgs84(lon: float, lat: float, iters: int = 3) -> tuple[float, float
 
 
 def to_utm(lon: float, lat: float, zone: int | None = None) -> tuple[float, float, int]:
-    """WGS84 lon/lat -> UTM (x, y, zone) 米. 懒加载 pyproj."""
+    """WGS84 lon/lat -> UTM (x, y, zone) 米. 懒加载 pyproj.
+
+    仅支持北半球 (EPSG:326xx); 中国全境适用. zone 自动推导并 clamp 到 1-60.
+    """
     from pyproj import Transformer  # noqa: PLC0415
     if zone is None:
-        zone = int((lon + 180.0) // 6) + 1
+        zone = min(int((lon + 180.0) // 6) + 1, 60)
+    zone = max(1, min(zone, 60))
     t = Transformer.from_crs("EPSG:4326", f"EPSG:326{zone:02d}", always_xy=True)
     x, y = t.transform(lon, lat)
     return x, y, zone
