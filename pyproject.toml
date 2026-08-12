@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MulanPSL-2.0
+# Robonix service package: AMap-assisted A->B navigation.
+[project]
+name = "robonix-amap-nav"
+version = "0.1.0"
+description = "AMap walking-route global path -> segment execution over navigate."
+requires-python = ">=3.10"
+dependencies = [
+    "mcp",
+    "fastmcp",
+    "robonix-api",
+    "pyproj",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+robonix-api = { workspace = true }

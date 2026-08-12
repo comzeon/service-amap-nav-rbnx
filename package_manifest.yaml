@@ -1,0 +1,32 @@
+# service-amap-nav-rbnx — AMap-assisted open-scene A->B navigation.
+# Control plane: robonix/service/navigation/amap_{goal,status,cancel,crossing_confirm}.
+# Consumes: robonix/service/navigation/navigate (+ status/cancel) as client.
+# Contracts + IDL ship inside this package (capabilities/); codegen merges
+# them with the framework tree (tools/codegen multi-contract-dir support).
+manifestVersion: 1
+
+package:
+  name: com.robonix.example.amap_nav
+  version: 0.1.0
+  vendor: robonix
+  description: AMap walking-route global path -> segment execution over navigate.
+  license: MulanPSL-2.0
+
+build: bash scripts/build.sh
+
+start: |
+  export PYTHONPATH="$(pwd)/rbnx-build/codegen/proto_gen:$(pwd)/rbnx-build/codegen/robonix_mcp_types:${PYTHONPATH:-}"
+  mkdir -p rbnx-build/data
+  exec rbnx-build/venv/bin/python -m amap_nav_service.service \
+       > rbnx-build/data/amap_nav.log 2>&1
+
+stop: |
+  pkill -TERM -f "[p]ython -m amap_nav_service.service" 2>/dev/null || true
+  sleep 1
+  pkill -KILL -f "[p]ython -m amap_nav_service.service" 2>/dev/null || true
+
+capabilities:
+  - name: robonix/service/navigation/amap_goal
+  - name: robonix/service/navigation/amap_status
+  - name: robonix/service/navigation/amap_cancel
+  - name: robonix/service/navigation/amap_crossing_confirm
