@@ -56,9 +56,9 @@ def _simplify(pts: list[tuple[float, float]], max_seg_m: float = MAX_SEG_M,
     """贪心抽稀: 保留拐点 + 累计距离达 max_seg_m 时保点.
 
     间距保证 ≤ max_seg_m + 单段步长（acc 先加后判, 允许一步过冲）。
-    例外: 少于 3 点的折线原样返回（无中间几何可插, 末点必达优先）。
+    例外: 单点或无点的折线原样返回（无几何可插）; 2 点长段由主循环插值。
     """
-    if len(pts) <= 2:
+    if len(pts) <= 1:
         return list(pts)
     out: list[tuple[float, float]] = [pts[0]]
     acc = 0.0
@@ -67,6 +67,20 @@ def _simplify(pts: list[tuple[float, float]], max_seg_m: float = MAX_SEG_M,
         d = _seg_dist(a, b)
         bearing = math.degrees(math.atan2(b[0] - a[0], b[1] - a[1]))
         turn = 0.0 if prev_bearing is None else abs((bearing - prev_bearing + 180) % 360 - 180)
+        if d >= max_seg_m:
+            # 长段(AMap 直路稀疏点可达数百米): 按 max_seg 线性插值补齐,
+            # 保证航点粒度 ≤ max_seg（拐点只在多边形顶点, 插值不丢拐点）
+            n = max(2, int(math.ceil(d / max_seg_m)))
+            for k in range(1, n):
+                t = k / n
+                ip = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+                if out[-1] != ip:
+                    out.append(ip)
+            if out[-1] != b:
+                out.append(b)
+            acc = 0.0
+            prev_bearing = bearing
+            continue
         if turn > turn_deg:
             # 拐点: 发射 a（转角发生处）, 距离从 a 继续累积
             if out[-1] != a:
@@ -86,6 +100,7 @@ def _simplify(pts: list[tuple[float, float]], max_seg_m: float = MAX_SEG_M,
 def plan(route: WalkingRoute) -> list[RouteWaypoint]:
     """严格白名单过滤 + 标记 + 抽稀. 不在白名单的段抛 RouteNotTraversable."""
     wps: list[RouteWaypoint] = []
+    last: tuple[float, float] | None = None
     for idx, step in enumerate(route.steps):
         if step.walk_type not in ALLOWED_WALK_TYPES:
             kind = "blocked" if step.walk_type in BLOCKED_WALK_TYPES else "unknown"
@@ -96,7 +111,10 @@ def plan(route: WalkingRoute) -> list[RouteWaypoint]:
         if not step.polyline:
             continue  # 无几何, 跳过(防御)
         for lon, lat in _simplify(step.polyline):
+            if last is not None and _seg_dist(last, (lon, lat)) < 0.5:
+                continue  # 段间首尾重复点去重
             wps.append(RouteWaypoint(lon=lon, lat=lat, seg_type=st, step_idx=idx))
+            last = (lon, lat)
     if not wps:
         raise RouteNotTraversable("route has no executable geometry")
     return wps

@@ -76,6 +76,14 @@ class TestPlan(unittest.TestCase):
         out = rp._simplify(pts, max_seg_m=40.0)
         self.assertIn((116.0003, 39.0), out)  # 拐点
 
+    def test_simplify_interpolates_long_gap(self):
+        # AMap 直路稀疏点: 两点相距 ~278m, 必须插值到 ≤ max_seg 粒度
+        pts = [(116.0, 39.0), (116.0025, 39.0)]
+        out = rp._simplify(pts, max_seg_m=40.0)
+        self.assertGreater(len(out), 2)  # 有插值点
+        self.assertTrue(all(rp._seg_dist(out[i], out[i + 1]) <= 40.0 + 1e-6
+                            for i in range(len(out) - 1)))
+
 
 class TestSegDist(unittest.TestCase):
     def test_known_distance(self):
