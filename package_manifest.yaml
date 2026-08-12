@@ -21,9 +21,9 @@ start: |
        > rbnx-build/data/amap_nav.log 2>&1
 
 stop: |
-  pkill -TERM -f "[p]ython -m amap_nav_service.service" 2>/dev/null || true
+  pkill -TERM -f "[p]ython -m amap_nav_service.service|[p]ython3 -m amap_nav_service.service|[a]map_nav_service.service" 2>/dev/null || true
   sleep 1
-  pkill -KILL -f "[p]ython -m amap_nav_service.service" 2>/dev/null || true
+  pkill -KILL -f "[p]ython -m amap_nav_service.service|[p]ython3 -m amap_nav_service.service|[a]map_nav_service.service" 2>/dev/null || true
 
 capabilities:
   - name: robonix/service/navigation/amap_goal
